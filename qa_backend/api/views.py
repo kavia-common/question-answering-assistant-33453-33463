@@ -1,4 +1,6 @@
 import os
+from typing import Optional, Tuple
+
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
@@ -8,13 +10,26 @@ from .models import QARecord
 from .serializers import QARecordSerializer, AskQuestionSerializer
 from .supabase_secret import get_openai_api_key_from_supabase
 
+
+def _resolve_openai_api_key() -> Optional[str]:
+    """
+    Resolve the OpenAI API key from environment or Supabase.
+    Returns None if not available.
+    """
+    return os.getenv("OPENAI_API_KEY") or get_openai_api_key_from_supabase()
+
+
 # Lazy import pattern for OpenAI client to avoid import errors when not needed
-def _get_openai_client():
+def _get_openai_client() -> Tuple[Optional[object], Optional[str]]:
     """
     Internal helper to instantiate the OpenAI client if API key is present.
-    Returns tuple (client, error_message). If client is None, error_message describes the issue.
+
+    Returns:
+        (client, error_message)
+        - client: OpenAI instance when successful, else None
+        - error_message: None when successful, otherwise an explanatory message
     """
-    api_key = os.getenv("OPENAI_API_KEY") or get_openai_api_key_from_supabase()
+    api_key = _resolve_openai_api_key()
     if not api_key:
         return None, (
             "Missing OpenAI configuration. Please set the OPENAI_API_KEY environment variable "
@@ -22,14 +37,18 @@ def _get_openai_client():
             "retrieve it securely."
         )
     try:
+        # Current SDK usage pattern (openai>=1.x):
+        #   from openai import OpenAI
+        #   client = OpenAI(api_key="...")
         from openai import OpenAI  # type: ignore
         client = OpenAI(api_key=api_key)
+        # Note: We intentionally do NOT pass unsupported args like 'proxies'.
         return client, None
     except Exception as e:
         return None, f"Failed to initialize OpenAI client: {e}"
 
 
-@api_view(['GET'])
+@api_view(["GET"])
 def health(request):
     """
     Simple health check endpoint.
@@ -54,9 +73,9 @@ def health(request):
     responses={
         201: QARecordSerializer,
         400: "Bad Request: invalid input",
-        503: "Service Unavailable: OpenAI not configured or API error",
+               503: "Service Unavailable: OpenAI not configured or API error",
     },
-    tags=["qa"]
+    tags=["qa"],
 )
 @api_view(["POST"])
 def ask_question(request):
@@ -84,18 +103,18 @@ def ask_question(request):
     client, init_error = _get_openai_client()
     if client is None:
         # Informative error about missing/misconfigured API key or init failure
-        return Response(
-            {"detail": init_error},
-            status=status.HTTP_503_SERVICE_UNAVAILABLE
-        )
+        return Response({"detail": init_error}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
     # Call OpenAI to get an intelligent answer
     try:
-        # Using the Chat Completions API (gpt-4o-mini is a cost-effective intelligent model)
+        # Current Chat Completions API usage for openai>=1.x
         completion = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant answering user questions clearly and concisely."},
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant answering user questions clearly and concisely.",
+                },
                 {"role": "user", "content": question_text},
             ],
             temperature=0.2,
@@ -104,10 +123,7 @@ def ask_question(request):
         if not answer_text:
             answer_text = "I'm sorry, I couldn't generate an answer at this time."
     except Exception as e:
-        return Response(
-            {"detail": f"OpenAI API error: {e}"},
-            status=status.HTTP_503_SERVICE_UNAVAILABLE
-        )
+        return Response({"detail": f"OpenAI API error: {e}"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
     record = QARecord.objects.create(question=question_text, answer=answer_text)
     output = QARecordSerializer(record)
@@ -119,11 +135,9 @@ def ask_question(request):
     method="get",
     operation_id="qa_history",
     operation_summary="Get Q&A history",
-    operation_description=(
-        "Returns the list of Q&A records sorted by most recent first."
-    ),
+    operation_description=("Returns the list of Q&A records sorted by most recent first."),
     responses={200: QARecordSerializer(many=True)},
-    tags=["qa"]
+    tags=["qa"],
 )
 @api_view(["GET"])
 def qa_history(request):
