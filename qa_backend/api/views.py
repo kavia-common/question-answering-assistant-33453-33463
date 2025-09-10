@@ -6,6 +6,7 @@ from drf_yasg.utils import swagger_auto_schema
 
 from .models import QARecord
 from .serializers import QARecordSerializer, AskQuestionSerializer
+from .supabase_secret import get_openai_api_key_from_supabase
 
 # Lazy import pattern for OpenAI client to avoid import errors when not needed
 def _get_openai_client():
@@ -13,11 +14,12 @@ def _get_openai_client():
     Internal helper to instantiate the OpenAI client if API key is present.
     Returns tuple (client, error_message). If client is None, error_message describes the issue.
     """
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("OPENAI_API_KEY") or get_openai_api_key_from_supabase()
     if not api_key:
         return None, (
             "Missing OpenAI configuration. Please set the OPENAI_API_KEY environment variable "
-            "in the backend environment. You can add it to a .env file or set it at runtime."
+            "or configure Supabase Secret Store and SUPABASE_* env vars so the backend can "
+            "retrieve it securely."
         )
     try:
         from openai import OpenAI  # type: ignore
